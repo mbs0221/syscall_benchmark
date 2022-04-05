@@ -1,5 +1,5 @@
 clear variables;
-syscalls = categorical({'nothing', 'getpid', 'getuid', 'time', 'read', 'ioctl', 'add\_key'});
+syscalls = categorical({'nothing', 'getpid', 'getuid', 'time', 'read', 'ioctl', 'add\_key', 'mincore'});
 
 nothing = importdata("nothing.txt");
 % Excluding the outliers from the average
@@ -36,5 +36,10 @@ add_key = importdata("add_key.txt");
 add_key = add_key(add_key < 4000);
 add_key_mean = round(mean(add_key));
 means(7) = add_key_mean;
+
+mincore = importdata("mincore.txt");
+mincore = mincore(mincore < 4000);
+mincore_mean = round(mean(mincore));
+means(8) = mincore_mean;
 
 bar(syscalls, means);
