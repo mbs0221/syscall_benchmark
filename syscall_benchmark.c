@@ -178,7 +178,7 @@ int main(void)
 		measurement[r] = tt;
 		total = total + tt;
 	}
-	output = fopen("get_mempolicy.txt", "w");
+	output = fopen("clock_gettime.txt", "w");
 	for(int r = 0; r < ROUNDS; r++)
 		fprintf(output, "%u\n", measurement[r]);
 	printf("clock_gettime\t%lu\n", total / ROUNDS);
