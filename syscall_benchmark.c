@@ -7,6 +7,7 @@
 #include <time.h>		// time(), clock_gettime()
 #include <fcntl.h>		// open
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #ifdef HAVE_KEYUTILS_H
 #include <keyutils.h>	// add_key
 #endif
@@ -16,13 +17,14 @@
 #endif
 #include <sys/mman.h>	// pkey_alloc, pkeyfree
 #include <unistd.h>
+#include <assert.h>
 
 #define rdtscp()({unsigned int result; asm volatile("rdtscp":"=a"(result)::"rdx","rcx","memory"); result;})
 
 #define PAGE_COUNT 1
 #define PAGE_SIZE 4096
 
-#define ROUNDS 10000
+#define ROUNDS 1
 
 typedef struct {
 	long arg1, arg2, arg3, arg4, arg5, arg6;
@@ -114,7 +116,7 @@ void setupRead(SyscallArgs *args) {
 
 void benchmarkRead(SyscallArgs *args, SyscallResult *result) {
 	int fd = args->arg1;
-	result->result = read(fd, 0, 0);
+	result->result = read(fd, args->arg2, args->arg3);
 }
 
 void cleanupRead(SyscallArgs *args, SyscallResult *result) {
@@ -124,6 +126,7 @@ void cleanupRead(SyscallArgs *args, SyscallResult *result) {
 	}
 
 	// Close file descriptor
+	assert(result->result != -1);
 	if (result->result != -1) {
 		close(args->arg1);
 	}
@@ -135,6 +138,7 @@ void setupWrite(SyscallArgs *args) {
 	args->arg1 = fd;
 	args->arg2 = malloc(4096);
 	args->arg3 = 4096;
+	sprintf((char*)args->arg2, "Hello, world!");
 }
 
 void benchmarkWrite(SyscallArgs *args, SyscallResult *result) {
@@ -151,9 +155,35 @@ void cleanupWrite(SyscallArgs *args, SyscallResult *result) {
 	}
 
 	// Close file descriptor
+	assert(result->result != -1);
 	if (result->result != -1) {
 		close(args->arg1);
 	}
+}
+
+void benchmarkOpen(SyscallArgs *args, SyscallResult *result) {
+	int fd = open("/dev/null", O_RDONLY);
+	result->result = fd;
+}
+
+void cleanupOpen(SyscallArgs *args, SyscallResult *result) {
+	// Close file descriptor
+	assert(result->result != -1);
+	if (result->result != -1) {
+		close(result->result);
+	}
+}
+
+void setupClose(SyscallArgs *args) {
+	int fd;
+	fd = open("/dev/null", O_RDONLY);
+	args->arg1 = fd;
+}
+
+void benchmarkClose(SyscallArgs *args, SyscallResult *result) {
+	int fd = args->arg1;
+	assert(fd != -1);
+	result->result = close(fd);
 }
 
 void setupIoctl(SyscallArgs *args) {
@@ -169,8 +199,22 @@ void benchmarkIoctl(SyscallArgs *args, SyscallResult *result) {
 
 void cleanupIoctl(SyscallArgs *args, SyscallResult *result) {
 	// Close file descriptor
+	assert(args->arg1 != -1);
 	if (args->arg1 != -1) {
 		close(args->arg1);
+	}
+}
+
+void benchmarkSocket(SyscallArgs *args, SyscallResult *result) {
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	result->result = fd;
+}
+
+void cleanupSocket(SyscallArgs *args, SyscallResult *result) {
+	// Close file descriptor
+	assert(result->result != -1);
+	if (result->result != -1) {
+		close(result->result);
 	}
 }
 
@@ -181,7 +225,27 @@ void benchmarkMmap(SyscallArgs *args, SyscallResult *result) {
 }
 
 void cleanupMmap(SyscallArgs *args, SyscallResult *result) {
+	assert(result->result != -1);
 	if (result->result != -1) {
+		munmap((void*)result->result, PAGE_COUNT * PAGE_SIZE);
+	}
+}
+
+void setupMprotect(SyscallArgs *args) {
+	uint8_t* buffer;
+	buffer = (uint8_t*)mmap(NULL, PAGE_COUNT * PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	args->arg1 = (long)buffer;
+}
+
+void benchmarkMprotect(SyscallArgs *args, SyscallResult *result) {
+	int ret;
+	uint8_t* buffer = (uint8_t*)args->arg1;
+	ret = mprotect(buffer, PAGE_COUNT * PAGE_SIZE, PROT_READ);
+	result->result = ret;
+}
+
+void cleanupMprotect(SyscallArgs *args, SyscallResult *result) {
+	if (args->arg1 != -1) {
 		munmap((void*)args->arg1, PAGE_COUNT * PAGE_SIZE);
 	}
 }
@@ -193,12 +257,13 @@ void setupUnmap(SyscallArgs *args) {
 }
 
 void benchmarkUnmap(SyscallArgs *args, SyscallResult *result) {
-	munmap((void*)args->arg1, PAGE_COUNT * PAGE_SIZE);
+	if (args->arg1 != -1) {
+		munmap((void*)args->arg1, PAGE_COUNT * PAGE_SIZE);
+	}
 }
 
 void benchmarkPkeyAlloc(SyscallArgs *args, SyscallResult *result) {
 	int pkey = pkey_alloc(0, PKEY_DISABLE_ACCESS|PKEY_DISABLE_WRITE);
-	pkey_free(pkey);
 	result->result = pkey;
 }
 
@@ -236,6 +301,7 @@ void setupMincore(SyscallArgs *args) {
 	args->arg1 = (long)buffer;
 	args->arg2 = length;
 	args->arg3 = (long)vec;
+	// printf("buffer: %p, length: %ld, vec: %p\n", buffer, length, vec);
 }
 
 void benchmarkMincore(SyscallArgs *args, SyscallResult *result) {
@@ -258,7 +324,7 @@ void cleanupMincore(SyscallArgs *args, SyscallResult *result) {
 #define BENCHMARK(name, __setup, __benchmark, __cleanup) \
 		{#name".txt", setup##__setup, benchmark##__benchmark, cleanup##__cleanup}
 
-int main(void) {
+int main(int argc, char *argv[]) {
 	uint32_t measurement[ROUNDS] = {0};
 
 	// Warmup loop
@@ -268,11 +334,14 @@ int main(void) {
 		BENCHMARK(Nothing, Nothing, Nothing, Nothing),
 		BENCHMARK(GetPid, Nothing, GetPid, Nothing),
 		BENCHMARK(GetUid, Nothing, GetUid, Nothing),
-		BENCHMARK(Time, Nothing, Time, Nothing),
 		BENCHMARK(Read, Read, Read, Read),
 		BENCHMARK(Write, Write, Write, Write),
+		BENCHMARK(Open, Nothing, Open, Open),
+		BENCHMARK(Close, Close, Close, Nothing),
 		BENCHMARK(Ioctl, Ioctl, Ioctl, Ioctl),
+		BENCHMARK(Socket, Nothing, Socket, Socket),
 		BENCHMARK(Mmap, Nothing, Mmap, Mmap),
+		BENCHMARK(Mprotect, Mprotect, Mprotect, Mprotect),
 		BENCHMARK(Unmap, Unmap, Unmap, Nothing),
 		BENCHMARK(PkeyAlloc, Nothing, PkeyAlloc, PkeyAlloc),
 #ifdef HAVE_KEYUTILS_H
@@ -282,12 +351,32 @@ int main(void) {
 		BENCHMARK(GetMempolicy, Nothing, GetMempolicy, Nothing),
 #endif
 		BENCHMARK(ClockGettime, Nothing, ClockGettime, Nothing),
-		BENCHMARK(Mincore, Mincore, Mincore, Mincore)
+		BENCHMARK(Mincore, Mincore, Mincore, Mincore),
+		BENCHMARK(Time, Nothing, Time, Nothing),
 	};
 
 	int numBenchmarks = sizeof(benchmarks) / sizeof(benchmarks[0]);
 
-	for (int i = 0; i < numBenchmarks; i++) {
+	if (argc < 2) {
+		printf("Usage: %s <benchmark>\n", argv[0]);
+		printf("Available benchmarks:\n");
+		for (int i = 0; i < numBenchmarks; i++) {
+			printf("%d: %s\n", i, benchmarks[i].name);
+		}
+		return 1;
+	}
+
+	int i = atoi(argv[1]);
+	if (i < 0 || i > numBenchmarks) {
+		printf("Invalid benchmark index\n");
+		return 1;
+	}
+
+	if (i == numBenchmarks) {
+		for (int j = 0; j < numBenchmarks; j++) {
+			runBenchmark(&benchmarks[j], measurement);
+		}
+	} else {
 		runBenchmark(&benchmarks[i], measurement);
 	}
 

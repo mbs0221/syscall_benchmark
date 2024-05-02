@@ -1,20 +1,24 @@
 # Benchmarking system calls
+
 This code measures the CPU cycles for various system calls.
 
 ## Compile and Execute
+
 ```
 $ make
 $ taskset -c 0 ./syscall_benchmark
 ```
 
 ## Results
+
 The timings are written in text files.
 
 MATLAB code "syscall_benchmark.m" can be used to read the files and plot the results.
 
-<img src="Results/syscall_benchmark.svg" width="750px" height="auto">
+<img src="Results/syscall_benchmark.svg" width="750px" height="auto" alt="syscall">
 
 ### Output on Terminal
+
 ```
 nothing		29
 getpid		1026
